@@ -1,0 +1,258 @@
+---
+title: "ML Assignmen2"
+author: "Nitin"
+date: "2024-02-18"
+output: html_document
+---
+
+```{r}
+
+# URLs for the dataset and names file
+url.train <- "http://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.data"
+url.names <- "http://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.names"
+
+# Downloading files
+download.file(url.train, destfile = "adult_train.csv")
+download.file(url.names, destfile = "adult_names.txt")
+
+# Reading the dataset
+# Note: The dataset may not have a header, you might need to set header = FALSE and manually set the column names
+# Example: read.csv("adult_train.csv", header = FALSE, col.names = c("age", "workclass", ...))
+adult_data <- read.csv("adult_train.csv", header = FALSE)
+
+# You may need to manually assign column names based on the 'adult.names' file or any given instructions
+# Example column names assignment
+colnames(adult_data) <- c("age", "workclass", "fnlwgt", "education", "education_num", "marital_status", "occupation", "relationship", "race", "sex", "capital_gain", "capital_loss", "hours_per_week", "native_country", "income")
+
+# Checking the structure of the dataset to understand the variable types
+str(adult_data)
+ 
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+# Assuming 'adult_data' is your dataframe
+str(adult_data)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r}
+# Assuming 'adult_data' is your dataframe
+
+# Check the structure
+str(adult_data)
+
+# Convert categorical variables to factors
+categorical_vars <- c("workclass", "education", "marital_status", "occupation",
+                      "relationship", "race", "sex", "native_country", "income")
+adult_data[categorical_vars] <- lapply(adult_data[categorical_vars], as.factor)
+
+# Handle numeric variables
+adult_data$age <- as.numeric(adult_data$age)
+adult_data$fnlwgt <- scale(adult_data$fnlwgt)  # Scaling might be needed
+adult_data$education_num <- as.numeric(adult_data$education_num)  # Keep as numeric
+
+# Check for missing values
+sum(is.na(adult_data))
+
+# Treat missing values as needed
+adult_data <- na.omit(adult_data)  # Example to remove NAs
+
+# Check the structure again
+str(adult_data)
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r}
+# Assuming 'adult_data' is your dataframe
+
+# Identify factor variables in the dataframe
+factor_vars <- sapply(adult_data, is.factor)
+
+# Count the number of unique categories for each factor variable
+unique_categories <- sapply(adult_data[, factor_vars], nlevels)
+
+# Print the unique category counts for each factor variable
+print(unique_categories)
+
+
+```
+
+
+
+```{r}
+ library(forcats)
+
+# Lump countries into 'Other' except for the top 'n'
+# Replace 'n' with the number of countries you want to keep separate
+adult_data$native_country <- fct_lump_n(adult_data$native_country, n = 5)
+
+# Check the results
+table(adult_data$native_country)
+
+```
+
+```{r}
+# Assuming 'adult_data' is your dataframe
+
+# Identify factor variables in the dataframe
+factor_vars <- sapply(adult_data, is.factor)
+
+# Count the number of unique categories for each factor variable
+unique_categories <- sapply(adult_data[, factor_vars], nlevels)
+
+# Print the unique category counts for each factor variable
+print(unique_categories)
+```
+
+```{r}
+# Assuming 'adult_data' is your dataframe
+
+# Scale numeric variables
+numeric_vars <- sapply(adult_data, is.numeric)
+adult_data[, numeric_vars] <- scale(adult_data[, numeric_vars])
+
+# Check for missing values in the dataset
+na_count <- sapply(adult_data, function(x) sum(is.na(x)))
+print(na_count)
+
+# If you find any missing values, decide on a strategy to handle them.
+# For example, removing rows with any NAs:
+adult_data <- na.omit(adult_data)
+
+# Or impute them, e.g., with the median for numeric columns
+# for (col in names(numeric_vars)[numeric_vars]) {
+#   if (sum(is.na(adult_data[, col])) > 0) {
+#     adult_data[, col][is.na(adult_data[, col])] <- median(adult_data[, col], na.rm = TRUE)
+#   }
+# }
+
+```
+
+```{r}
+# Assuming 'adult_data' is your dataframe
+
+# Summary statistics for numeric variables
+summary(adult_data[, numeric_vars])
+
+# Correlation matrix for numeric variables
+correlations <- cor(adult_data[, numeric_vars, drop = FALSE]) # Ensure result is a matrix even if there's only one numeric variable
+print(correlations)
+
+# Visualization: Histogram of 'age'
+hist(adult_data$age, main="Histogram of Age", xlab="Age")
+
+# Visualization: Boxplot of 'hours_per_week' by 'income'
+boxplot(hours_per_week ~ income, data = adult_data, main="Hours per Week by Income", ylab="Hours per Week")
+
+# Visualization: Scatter plot for 'age' vs 'hours_per_week' colored by 'income'
+with(adult_data, {
+  plot(age, hours_per_week, col=income, main="Scatterplot of Age vs. Hours per Week", xlab="Age", ylab="Hours per Week", pch=19)
+  legend("topright", legend=levels(income), col=1:2, pch=19)
+})
+
+```
+
+
+
+```{r}
+library(caret)
+library(ROCR)
+
+# Assuming that 'adult_data' is preprocessed and ready for modeling
+set.seed(123)  # For reproducibility
+
+# Split the data into training (75%) and test (25%) sets
+splitIndex <- createDataPartition(adult_data$income, p = 0.75, list = FALSE)
+trainingSet <- adult_data[splitIndex, ]
+testSet <- adult_data[-splitIndex, ]
+
+# Define the training control with less intensive parameters
+train_control <- trainControl(method = "cv", number = 5)  # Using simple cross-validation
+
+# Select a smaller range of k values to try
+k_values <- data.frame(k = seq(7, 21, by = 7))  # Trying only three k values
+
+# Train the kNN model using a smaller tune grid and fewer cross-validation folds
+knn_fit <- train(income ~ ., data = trainingSet, method = "knn", trControl = train_control,
+                 preProcess = c("center", "scale"), tuneGrid = k_values)
+
+# Predict on the test set
+test_pred <- predict(knn_fit, newdata = testSet)
+
+# Calculate accuracy
+conf_matrix <- confusionMatrix(test_pred, testSet$income)
+accuracy <- conf_matrix$overall['Accuracy']
+print(paste("Accuracy:", accuracy))
+
+# Predict probabilities on the test set for ROC analysis
+test_prob <- predict(knn_fit, newdata = testSet, type = "prob")
+
+# Calculate AUC
+pred <- prediction(test_prob[,2], testSet$income)
+perf <- performance(pred, "tpr", "fpr")
+auc <- performance(pred, "auc")
+knn_auc <- auc@y.values[[1]]  # Store AUC in 'knn_auc'
+
+# Plot ROC curve
+plot(perf, colorize = TRUE)
+abline(a = 0, b = 1, lty = 2, col = "gray")
+text(0.5, 0.5, paste("AUC =", format(knn_auc, digits = 4)), col = "red")
+
+```
+
+```{r}
+library(pROC)
+
+# Ensure 'trainingSet' and 'testSet' have been created and are ready for modeling
+
+# Train the LPM using lm (for a proper Linear Probability Model)
+lpm_fit <- lm(income ~ ., data = trainingSet)
+
+# Predict on the test set using the LPM model
+lpm_pred <- predict(lpm_fit, newdata = testSet)
+
+# Since LPM predictions can be outside [0,1], we'll need to clip the predictions to this range
+lpm_pred_prob <- pmin(pmax(lpm_pred, 0), 1)
+
+# Convert the 'income' factor to a binary numeric variable for AUC calculation
+testSet$income_numeric <- as.numeric(testSet$income == levels(testSet$income)[2])
+
+# Calculate AUC for LPM
+lpm_roc_obj <- roc(response = testSet$income_numeric, predictor = lpm_pred_prob)
+lpm_auc <- auc(lpm_roc_obj)
+
+# Print AUC for LPM model
+print(paste("AUC for LPM:", lpm_auc))
+
+# Compare AUC of kNN and LPM
+# Make sure you have 'knn_auc' from your previous kNN model results
+# If not, replace 'knn_auc' with the actual AUC value from the kNN model
+print(paste("Difference in AUC between kNN and LPM:", abs(knn_auc - lpm_auc)))
+
+# Identify most important predictors from the LPM
+# Larger absolute t-values indicate greater importance
+coef_summary <- summary(lpm_fit)
+important_predictors <- coef_summary$coefficients[order(abs(coef_summary$coefficients[, "t value"]), decreasing = TRUE), ]
+print(important_predictors)
+
+```
+
+```{r}
+# Assuming 'lpm_auc' is the AUC from the LPM model
+print(paste("AUC for kNN:", knn_auc))
+print(paste("AUC for LPM:", lpm_auc))
+print(paste("Difference in AUC between kNN and LPM:", abs(knn_auc - lpm_auc)))
+
+```
+

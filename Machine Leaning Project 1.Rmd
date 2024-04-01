@@ -1,0 +1,286 @@
+---
+title: "Yashwanth_Corrected_Code"
+author: "yachu"
+date: "2024-02-06"
+output: html_document
+---
+
+```{r}
+# Load the necessary libraries
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(caret)
+library(ROCR)
+```
+
+```{r}
+# Load the dataset (replace with your file path)
+data <- read.csv("/Users/yachu/Downloads/ConsumerSurvey.csv")
+
+```
+
+
+```{r}
+# Data preprocessing
+# Assuming 'data' is your dataframe
+data_clean <- na.omit(data)
+data <- data %>%
+  mutate(across(everything(), ~ifelse(is.na(.), median(., na.rm = TRUE), .))) %>%
+  mutate(V1 = as.factor(V1),
+         V2 = as.factor(V2),
+         V3 = as.factor(V3))
+
+# Normalizing and standardizing numerical variables (if needed)
+data <- data %>%
+  mutate(across(c(V5, V8, V12, V14), scale)) %>%
+  mutate(across(c(V5, V8, V12, V14), as.vector)) %>%
+  mutate(across(c(V4, V6, V7, V9, V11, V13), ~(. - min(.)) / (max(.) - min(.))))
+```
+
+
+```{r}
+# EDA
+categorical_vars <- c('V1', 'V2', 'V3', 'target')
+for (var in categorical_vars) {
+  print(ggplot(data, aes_string(x=var)) +
+          geom_bar() +
+          labs(title=paste("Distribution of", var), x=var, y="Count"))
+}
+
+continuous_vars <- c('V4', 'V5', 'V6', 'V7', 'V8', 'V9', 'V11', 'V12', 'V13', 'V14')
+for (var in continuous_vars) {
+  print(ggplot(data, aes_string(x=var)) +
+          geom_histogram(bins=30, fill="blue", color="black") +
+          labs(title=paste("Histogram of", var), x=var, y="Frequency") +
+          theme_minimal())
+}
+
+# Box plots for Continuous Variables to identify outliers
+for (var in continuous_vars) {
+  print(ggplot(data, aes_string(y=var, x=1)) +
+          geom_boxplot() +
+          labs(title=paste("Box Plot of", var), x="", y=var) +
+          theme_minimal())
+}
+
+# Scatter plots
+ggplot(data, aes(x=V4, y=V5)) +
+  geom_point(alpha=0.5) +
+  labs(title="Scatter Plot of V4 vs V5", x="V4", y="V5") +
+  theme_minimal()
+
+ggplot(data, aes(x=V4, y=V6)) +
+  geom_point(alpha=0.5) +
+  labs(title="Scatter Plot of V4 vs V6", x="V4", y="V6") +
+  theme_minimal()
+
+```
+
+
+
+
+
+```{r}
+# Correlation matrix
+numeric_data <- select_if(data, is.numeric)
+numeric_data <- numeric_data[, sapply(numeric_data, function(v) var(v, na.rm = TRUE) != 0)]
+cor_matrix <- cor(numeric_data, use="complete.obs")
+
+# Visualize the correlation matrix using corrplot
+library(corrplot)
+corrplot(cor_matrix, method="color", type="upper", order="hclust",
+         tl.col="black", tl.srt=45, addCoef.col = "black")
+
+```
+
+
+```{r}
+#LPM Model and logistic regression model
+# Split data into training and testing sets (example using 70%-30% split)
+set.seed(123)  # For reproducibility
+training_index <- sample(1:nrow(data), 0.7 * nrow(data))
+train_data <- data[training_index, ]
+test_data <- data[-training_index, ]
+
+# Linear Probability Model
+lpm_model <- lm(target ~ ., data = train_data[, -which(names(train_data) %in% c("V2", "V3"))])
+
+# Logistic Regression Model
+logit_model <- glm(target ~ ., family = binomial, data = train_data[, -which(names(train_data) %in% c("V2", "V3"))])
+
+# Predictions
+lpm_predictions <- predict(lpm_model, test_data[, -which(names(test_data) %in% c("V2", "V3", "target"))], type = "response")
+logit_predictions <- predict(logit_model, test_data[, -which(names(test_data) %in% c("V2", "V3", "target"))], type = "response")
+
+# Applying 0.5 threshold
+lpm_class_predictions <- ifelse(lpm_predictions > 0.5, 1, 0)
+logit_class_predictions <- ifelse(logit_predictions > 0.5, 1, 0)
+
+# Evaluating Accuracy
+lpm_accuracy <- mean(lpm_class_predictions == test_data$target)
+logit_accuracy <- mean(logit_class_predictions == test_data$target)
+
+# Print accuracies
+print(paste("LPM Accuracy:", lpm_accuracy))
+print(paste("Logistic Regression Accuracy:", logit_accuracy))
+
+# Finding the Optimal Threshold and the Corresponding Confusion Matrix with LPM
+library(pROC)
+
+roc_result <- roc(test_data$target, lpm_predictions)
+optimal_thresholds <- coords(roc_result, "best", best.method="closest.topleft")
+
+library(caret)
+
+optimal_predictions <- ifelse(lpm_predictions > optimal_thresholds$threshold, 1, 0)
+confusionMatrix(as.factor(optimal_predictions), as.factor(test_data$target))
+
+# Finding the Optimal Threshold and the Corresponding Confusion Matrix with Logistic Regression
+
+# Assuming 'logit_model' is your fitted Logistic Regression model
+
+logit_probabilities <- predict(logit_model, newdata = test_data, type = "response")
+
+roc_result <- roc(test_data$target, logit_probabilities)
+optimal_thresholds <- coords(roc_result, "best", best.method="closest.topleft")
+
+optimal_predictions <- ifelse(logit_probabilities > optimal_thresholds$threshold, 1, 0)
+
+confusionMatrix(as.factor(optimal_predictions), as.factor(test_data$target))
+
+```
+
+
+
+```{r}
+#Method 1- Multiple Runs of the models
+# Load necessary libraries
+library(dplyr)
+library(caret)
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Number of runs
+num_runs <- 10
+
+# Initialize vectors to store accuracies
+lpm_accuracies <- numeric(num_runs)
+logistic_accuracies <- numeric(num_runs)
+
+# Load your dataset (replace with your file path)
+data <- read.csv("/Users/yachu/Downloads/ConsumerSurvey.csv")
+
+# Data preprocessing (assuming 'data' is your dataframe)
+# Handle missing values by imputing with median
+data_clean <- data %>%
+  mutate(across(everything(), ~ifelse(is.na(.), median(., na.rm = TRUE), .))) %>%
+  mutate_at(vars(V1, V2, V3), as.factor)  # Convert to factors
+
+# Loop through multiple runs
+for (i in 1:num_runs) {
+  # Create a random train-test split (70% train, 30% test)
+  index <- createDataPartition(data_clean$target, p = 0.7, list = FALSE)
+  train_data <- data_clean[index, ]
+  test_data <- data_clean[-index, ]
+  
+  # Linear Probability Model (LPM)
+  lpm_model <- glm(target ~ ., data = train_data, family = binomial(link = "probit"))
+  lpm_predictions <- predict(lpm_model, newdata = test_data, type = "response")
+  lpm_accuracy <- mean(ifelse(lpm_predictions > 0.5, 1, 0) == test_data$target)
+  lpm_accuracies[i] <- lpm_accuracy
+  
+  # Logistic Regression Model
+  log_model <- glm(target ~ ., data = train_data, family = binomial(link = "logit"))
+  log_predictions <- predict(log_model, newdata = test_data, type = "response")
+  log_accuracy <- mean(ifelse(log_predictions > 0.5, 1, 0) == test_data$target)
+  logistic_accuracies[i] <- log_accuracy
+}
+
+# Calculate average accuracies and confidence intervals
+avg_lpm_accuracy <- mean(lpm_accuracies)
+avg_logistic_accuracy <- mean(logistic_accuracies)
+ci_lpm_accuracy <- quantile(lpm_accuracies, c(0.025, 0.975))
+ci_logistic_accuracy <- quantile(logistic_accuracies, c(0.025, 0.975))
+
+# Print the results
+cat("Average Accuracy for LPM:", avg_lpm_accuracy, "\n")
+cat("95% Confidence Interval for LPM Accuracy:", ci_lpm_accuracy[1], "-", ci_lpm_accuracy[2], "\n")
+cat("Average Accuracy for Logistic Regression:", avg_logistic_accuracy, "\n")
+cat("95% Confidence Interval for Logistic Regression Accuracy:", ci_logistic_accuracy[1], "-", ci_logistic_accuracy[2], "\n")
+
+```
+
+```{r}
+#Multiple Runs of the Models - Method 2 - I take method  also because it here I am taking #categorical variables V2, V3 and target as factors and then fitting model
+
+# Multiple Runs of the Models - Method 2
+
+library(caret)
+library(pROC)
+
+# Setup for multiple runs
+
+set.seed(123)  # For reproducibility
+
+n_runs <- 10
+accuracies_lpm <- numeric(n_runs)
+accuracies_logit <- numeric(n_runs)
+
+for(i in 1:n_runs) {
+  # Split data into training and testing sets (example using 70%-30% split)
+  set.seed(i)  # Change seed for each run to get different splits
+  training_index <- sample(1:nrow(data), 0.7 * nrow(data))
+  train_data <- data[training_index, ]
+  test_data <- data[-training_index, ]
+  
+  # Fit Linear Probability Model (LPM)
+  lpm_model <- lm(target ~ ., data = train_data[, -which(names(train_data) %in% c("V2", "V3"))])
+  
+  # Fit Logistic Regression Model
+  logit_model <- glm(target ~ ., family = binomial, data = train_data[, -which(names(train_data) %in% c("V2", "V3"))])
+  
+  # Predictions for LPM and Logistic Regression
+  lpm_predictions <- predict(lpm_model, test_data[, -which(names(test_data) %in% c("V2", "V3", "target"))])
+  logit_probabilities <- predict(logit_model, newdata = test_data[, -which(names(test_data) %in% c("V2", "V3", "target"))], type = "response")
+  
+  # Applying 0.5 threshold for classification
+  lpm_class_predictions <- ifelse(lpm_predictions > 0.5, 1, 0)
+  logit_class_predictions <- ifelse(logit_probabilities > 0.5, 1, 0)
+  
+  # Calculating accuracies
+  accuracies_lpm[i] <- mean(lpm_class_predictions == test_data$target)
+  accuracies_logit[i] <- mean(logit_class_predictions == test_data$target)
+}
+
+# Calculate average accuracies and 95% confidence intervals for each model
+average_accuracy_lpm <- mean(accuracies_lpm)
+ci_lpm <- quantile(accuracies_lpm, probs = c(0.025, 0.975))
+average_accuracy_logit <- mean(accuracies_logit)
+ci_logit <- quantile(accuracies_logit, probs = c(0.025, 0.975))
+
+# Output the results
+cat("LPM Average Accuracy:", average_accuracy_lpm, "CI:", ci_lpm, "\n")
+cat("Logistic Regression Average Accuracy:", average_accuracy_logit, "CI:", ci_logit, "\n")
+
+
+```
+
+
+```{r}
+# Fit the LPM model
+lpm_model <- lm(target ~ ., data=train_data)
+
+# Examine the coefficients
+coefficients <- coef(lpm_model)
+
+# Identify the variables with the largest absolute coefficients
+top_variables <- names(coefficients[order(-abs(coefficients))][1:4])
+
+# Print the top influential variables
+cat("Top Influential Variables:\n")
+cat(top_variables, sep=", ")
+
+```
+
